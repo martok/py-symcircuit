@@ -10,14 +10,12 @@ As a bonus, the equation solving part can be used independently of the rest.
 
 Minimal install using pip (just the equation solver):
 
-```pip install SymCircuit@git+https://github.com/martok/py-symcircuit.git```
+```pip install SymCircuit```
 
 Full install using pip:
 
-```pip install SymCircuit[EE]@git+https://github.com/martok/py-symcircuit.git```
+```pip install SymCircuit[EE]```
 
-The plotting capabilities use [Plotkit](https://github.com/martok/py-plotkit/), which might have to be installed
-manually before.
 
 ## Usage
 
@@ -72,7 +70,7 @@ fig = plot_system(impedance, 10, 50000, values=v, amplitude_linear=True, return_
 pk.finalize(fig)
 ```
 Result:
-![Example Output](doc/impedance_plot.png)
+![Example Output](https://raw.githubusercontent.com/martok/py-symcircuit/main/doc/impedance_plot.png)
 
 ## Credits:
 
