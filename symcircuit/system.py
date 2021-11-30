@@ -322,6 +322,17 @@ class SymbolicSystem:
         expr = expr.simplify()
         return expr
 
+    def extract(self, symbol: Union[Symbol, str], poly_collect: Optional[Iterable[Union[Symbol, str]]] = None) -> Optional[Expr]:
+        if isinstance(symbol, Symbol):
+            symbol = symbol.name
+        rules = self.focus(symbol)
+        if not rules:
+            return None
+        r = rules[symbol]
+        if poly_collect:
+            return r.collect(poly_collect)
+        return r
+
 
 def _StrPrinter_print_Relational(self, expr):
     from sympy.printing.precedence import precedence
