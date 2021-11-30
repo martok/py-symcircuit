@@ -91,17 +91,22 @@ def seek(eqs: List[Eq], goals: SymbolSet, rules: ReplacementRules, *,
 
 def reduce_replacements(rules: ReplacementRules, final: int) -> ReplacementRules:
     rules = rules.copy()
+    # apply each replacement into the precedint rules, down to the `final` queried set
     while len(rules) > final:
         x, s = rules.pop()
-        rep = {x: s}
+        # slightly simplify, but don't call simplify() because that can be *very* complex
+        # (and since the loop here is sort-of recursive, actually exponentially complex)
+        rep = {x: s.cancel()}
         for i, (xx, ss) in enumerate(rules):
             rules[i] = (xx, ss.xreplace(rep))
+    # for any rule beyond the first, expand references involving the other goals so that each is fully independent
     for i in reversed(range(1, len(rules))):
         x, s = rules[i]
         rep = {x: s}
         for j in range(i):
             y, t = rules[j]
-            rules[j] = y, sym_invert(y - t.xreplace(rep), y)[0]
+            ind, dep = sym_invert(y - t.xreplace(rep), y)
+            rules[j] = y, ind
     return rules
 
 
@@ -283,15 +288,38 @@ class SymbolicSystem:
             seek(eqs, syms, replacements, recursive=True, parameters=self.parameters, verbose=self.debug)
         if evaluate:
             rules = reduce_replacements(replacements, len(goals))
-            rdict = {s.name: self.apply_limits(e.simplify()) for s, e in rules}
+            rdict = {s.name: self.apply_limits(e) for s, e in rules}
             return rdict
         else:
             return replacements
 
     def apply_limits(self, expr: Expr) -> Expr:
+        # pre-simplify
+        expr = expr.simplify()
+        if not self.limits:
+            return expr
+        # apply limits in order of how much it likely simplifies the expression:
+        #   1.  x -> 0
+        #   2.  x -> inf
+        #   3.  everything else
+        l_zero = []
+        l_inf = []
+        l_other = []
         for lim in self.limits:
+            z0: Expr = lim.args[2]
+            if z0.is_zero:
+                l_zero.append(lim)
+            elif not z0.is_finite:
+                l_inf.append(lim)
+            else:
+                l_other.append(lim)
+        order = l_zero + l_inf + l_other
+        for lim in order:
             lim = lim.subs(self.limit_symbol, expr)
-            expr = lim.doit().simplify()
+            expr = lim.doit()
+            expr = expr.cancel()
+        # post-simplify
+        expr = expr.simplify()
         return expr
 
 
