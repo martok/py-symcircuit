@@ -1,9 +1,10 @@
 import re
 from typing import List, Dict, Set, Tuple, Union, Optional, Iterable
 
-from sympy import StrPrinter, Eq, Symbol, symbols, Expr, Limit
+from sympy import StrPrinter, Eq, Symbol, symbols, Expr, Limit, cse
 from sympy import Tuple as TTuple
 from sympy.core.assumptions import _assume_defined
+from sympy.printing.pycode import pycode
 from sympy.solvers.solvers import _invert as sym_invert
 
 # focus & seek based on https://github.com/sympy/sympy/issues/2720#issuecomment-312437508 by Christopher Smith @smichr
@@ -11,6 +12,7 @@ from sympy.solvers.solvers import _invert as sym_invert
 SymbolMap = Dict[str, Symbol]
 ExpressionMap = Dict[str, Expr]
 SymbolSet = Set[Symbol]
+SymbolItS = Iterable[Union[Symbol, str]]
 ReplacementRule = Tuple[Symbol, Expr]
 ReplacementRules = List[ReplacementRule]
 
@@ -21,6 +23,12 @@ def complexity(e: Union[Eq, Expr]) -> int:
 
 def sortedsyms(s: SymbolSet) -> Iterable[Symbol]:
     return sorted(s, key=lambda sym: sym.name)
+
+
+def as_symbols(syms: Optional[SymbolItS]) -> Optional[Iterable[Symbol]]:
+    if syms is None:
+        return
+    return [Symbol(s) if isinstance(s, str) else s for s in syms]
 
 
 def sympy_parse(s: str, locs: SymbolMap) -> Optional[Expr]:
@@ -322,7 +330,7 @@ class SymbolicSystem:
         expr = expr.simplify()
         return expr
 
-    def extract(self, symbol: Union[Symbol, str], poly_collect: Optional[Iterable[Union[Symbol, str]]] = None) -> Optional[Expr]:
+    def extract(self, symbol: Union[Symbol, str], poly_collect: Optional[SymbolItS] = None) -> Optional[Expr]:
         if isinstance(symbol, Symbol):
             symbol = symbol.name
         rules = self.focus(symbol)
@@ -330,8 +338,18 @@ class SymbolicSystem:
             return None
         r = rules[symbol]
         if poly_collect:
+            poly_collect = as_symbols(poly_collect)
             return r.collect(poly_collect)
         return r
+
+
+def pycode_cse(expr: Expr, *, symbols: Optional[Iterable[Symbol]] = None, ignore: Optional[SymbolItS] = None) -> str:
+    lines = []
+    subex, ered = cse(expr, list=False, symbols=symbols, ignore=as_symbols(ignore))
+    for v, e in subex:
+        lines.append(v.name + " = " + pycode(e))
+    lines.append("return " + pycode(ered))
+    return "\n".join(lines)
 
 
 def _StrPrinter_print_Relational(self, expr):
