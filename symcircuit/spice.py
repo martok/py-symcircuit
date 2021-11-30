@@ -299,6 +299,7 @@ class Circuit:
         g = self.to_graph()
         eqs = Circuit.graph_to_equations(g)
         script = "\n".join(str(e) for e in eqs)
+        script += "\ns == const"
         for el in self.elements:
             script += f"\n{el.name} == const"
         return script
