@@ -47,23 +47,54 @@ def seek(eqs: List[Eq], goals: SymbolSet, rules: ReplacementRules, *,
         parameters = set()
     goals.difference_update(parameters)
 
-    def find_replacement_step():
-        # go through equations, try find one that can be solved for a symbol we want
-        for e in eqs:
-            if not isinstance(e, Eq):
+    def solve_for_x(eq: Eq, x: Symbol) -> Optional[Expr]:
+        # rewrite two-sided equation to single expression == 0
+        tozero = eq.lhs - eq.rhs
+        ex, d = sym_invert(tozero, x)
+        if d != x:
+            return
+        return ex
+
+    def rule_generator():
+        # produce all possible replacements from current rules and goals
+        expanded_eqs = set()
+        for ieq, eq in enumerate(eqs):
+            if not isinstance(eq, Eq):
                 continue
             for s in sortedsyms(goals):
-                # rewrite two-sided equation to single expression == 0
-                tozero = e.lhs - e.rhs
-                ex, d = sym_invert(tozero, s)
-                if d != s:
-                    continue
-                # didn't fail? note transformation and remove from pool
-                rules.append((d, ex))
-                eqs.remove(e)
-                if verbose:
-                    print(f"from {str(e)}: {str(d)} == {ex}")
-                return s, ex
+                ex = solve_for_x(eq, s)
+                if ex is None:
+                    if ieq not in expanded_eqs and s in eq.free_symbols:
+                        # symbol is present, maybe invert just failed?
+                        eq = eq.expand()
+                        eqs[ieq] = eq
+                        expanded_eqs.add(ieq)
+                        ex = solve_for_x(eq, s)
+                        if ex is None:
+                            # really not possible
+                            continue
+                    else:
+                        continue
+                yield eq, s, ex
+
+    def introduced_goals(ex: Expr):
+        # how many new symbols would we have to solve for when this expressions is applied?
+        missing = set(ex.free_symbols) - goals - parameters
+        return len(missing)
+
+    def expression_schedule(gen):
+        # prefer expressions that introduce the least number of new goals
+        # ideally takes solutions that only involve constant parameters, but generally still uses previous
+        # knowledge/rules more effectively
+        return sorted(gen, key=lambda t: introduced_goals(t[2]))
+
+    def find_replacement_step():
+        for eq, s, ex in expression_schedule(rule_generator()):
+            # remove from pool and return
+            eqs.remove(eq)
+            if verbose:
+                print(f"from {str(eq)}: {str(s)} == {ex}")
+            return s, ex
         # no equation solves to anything we need. this is bad
         raise ValueError(f"equation system cannot be inverted for: {str(goals)}")
 
@@ -75,11 +106,12 @@ def seek(eqs: List[Eq], goals: SymbolSet, rules: ReplacementRules, *,
             # avoid dividing by zero
             ln, ld = eq.lhs.as_numer_denom()
             rn, rd = eq.rhs.as_numer_denom()
-            new: Eq = Eq(ln * rd, rn * ld).xreplace(rep)
+            lhs = (ln * rd).collect(sym)
+            rhs = (rn * ld).collect(sym)
+            new: Eq = Eq(lhs, rhs).xreplace(rep)
             if new is False:
                 raise ValueError('inconsistency detected')
-            # sometimes invert doesn't do well on complicated polynomials... try expanding it just in case
-            eqs[i] = new.expand()
+            eqs[i] = new
         eqs.sort(key=complexity)
 
     eqs.sort(key=complexity)
@@ -91,6 +123,7 @@ def seek(eqs: List[Eq], goals: SymbolSet, rules: ReplacementRules, *,
             if recursive:
                 break
             raise
+        rules.append((sym, expr))
         goals.remove(sym)
         if recursive:
             goals |= (expr.free_symbols - parameters)
@@ -98,24 +131,34 @@ def seek(eqs: List[Eq], goals: SymbolSet, rules: ReplacementRules, *,
 
 
 def reduce_replacements(rules: ReplacementRules, final: int) -> ReplacementRules:
-    rules = rules.copy()
-    # apply each replacement into the precedint rules, down to the `final` queried set
-    while len(rules) > final:
-        x, s = rules.pop()
-        # slightly simplify, but don't call simplify() because that can be *very* complex
-        # (and since the loop here is sort-of recursive, actually exponentially complex)
-        rep = {x: s.cancel()}
-        for i, (xx, ss) in enumerate(rules):
-            rules[i] = (xx, ss.xreplace(rep))
-    # for any rule beyond the first, expand references involving the other goals so that each is fully independent
-    for i in reversed(range(1, len(rules))):
+    targets = rules[:final]
+    parts = rules[final:]
+
+    # apply all instructions for independents into the target expressions
+    while parts:
+        x, s = parts.pop(0)
+        s = s.cancel()
+        rep = {x: s}
+        for i, (xx, ss) in enumerate(targets):
+            # slightly simplify, but don't call simplify() because that can be *very* complex
+            ss = ss.collect(x)
+            sr = ss.xreplace(rep)
+            sr = sr.cancel()
+            targets[i] = (xx, sr)
+
+    # if we had more than one target, the later ones may be components in the previous ones
+    # for any rule beyond the first, expand references involving the other targets so that each is fully independent
+    for i in reversed(range(1, len(targets))):
         x, s = rules[i]
         rep = {x: s}
         for j in range(i):
             y, t = rules[j]
-            ind, dep = sym_invert(y - t.xreplace(rep), y)
+            # invert may fail if not expanded enough
+            yex = (y - t.xreplace(rep)).expand()
+            ind, dep = sym_invert(yex, y)
+            ind = ind.cancel()
             rules[j] = y, ind
-    return rules
+    return targets
 
 
 class SymbolicSystem:
