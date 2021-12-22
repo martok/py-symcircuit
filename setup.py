@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="SymCircuit",
-    version="0.1.0",
+    version="0.2.0",
     author="Martok",
     author_email="martok@martoks-place.de",
     description="Symbolic electronic circuit analysis",
